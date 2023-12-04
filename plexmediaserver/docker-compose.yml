@@ -1,0 +1,91 @@
+---
+version: '3.2'
+
+## NOTES:
+# This version seems to be working great for Plex as of 12/3/2023
+#    Migrated successfully from Fedora 38 -> Rocky Linux 9.3 with no issues,
+#    other than that SELinux doesn't have policies for it, so that had to be disabled.
+
+# Define the networking details plexmediaserver_network:
+#    Note: Podman automagically creates the corresponding interfaces in NetworkManager,
+#          Following the convention, 'podmanX,' placing them in the default zone as configured in FIREWALLD.
+#          If the firewall is very simple, just using that default zone as the endpoint and adding 'plex' as a service
+#          to that zone will work fine. 
+#   
+#          Otherwise...  Read up on policies and perhaps do something as follows:
+#
+#             # firewall-cmd --permanent --new-policy=podman_dmz          
+#
+#          podman_dmz:
+#
+#          Public Zone:       Podman Zone:
+#          eth0    <------->  PodmanX
+#          Ingress <------->  Egress
+#   
+#             # firewall-cmd --permanent --policy=podman_dmz --add-service=Plex
+#             # firewall-cmd --reload
+
+# I made this bridge network a /24, but much smaller would be fine too, with room to also hold other containers
+# in a more complex setup...
+networks:
+  network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: <SUBNET/CIDR>
+          gateway: <SUBNET_GATEWAY>
+
+# Define any containers that will be related to the base project, plexmediaserver.
+# i.e. metadata engine, and so on...
+services:
+  plex:
+    # This is the image everyone seems to use, I haven't tested any others...
+    image: 'lscr.io/linuxserver/plex:latest' # Assume using the latest image for easy updates...
+    container_name: 'plexmediaserver'
+    hostname: '<CHOOSE_CONTAINER_HOSTNAME>'
+    networks:
+      network:
+        ipv4_address: '<CHOOSE IP IN SUBNET>
+    ports:
+      - '32400:32400' # The only "required port." Others are technically optional...  All are included in the firewalld service 'plex'
+      - '1900:1900'   #    firewall-cmd --info-service=plex
+      - '5353:5353'
+      - '8324:8324'
+      - '32410:32410'
+      - '32412:32412'
+      - '32413:32413'
+      - '32414:32414'
+      - '32469:32469'
+    # Notes:
+    #    This is a mandatory step before the VM will work, as you're setting aside a non-privileged 'system' user 
+    #    for plex to run under for the purpose of doing whatever container magic behind the scenes, as well as accessing
+    #    the files it requires to run.  i.e. its library directory and whatever else...  These values will likely be unique to 
+    #    the system it's being deployed on.  So, be sure to check with the id command.
+    #
+    #    Configuring the plex system user:
+    #       # Configure a plex user:
+    #       # useradd --system plex
+    #       # id plex                       <-- Write these values into PUID/PGID below...
+    environment:
+      - 'PUID=<UID>' # plex user UID
+      - 'PGID=<GID>' # plex user GID
+      - 'TZ=Etc/UTC'
+      - 'Version=docker' # This is necessary so Plex doesn't attempt to upgrade itself, as the container is essentially a read-only environment...      
+      - 'PLEX_CLAIM=<CLAIM_CODE>' # Get a plex claim code: https://www.plex.tv/claim/
+
+
+      # Configuring Permissions:
+      #
+      # You'll want something like this...
+      # drwxrws---. 6 matthew plex    62 Oct  3 14:17 media
+    
+    # Notes:
+    #    This is another important step...  Change the directories to match wherever your movie content is 
+    #    located, following the format <Real Location on Physical Box>:<Where the VM should think it really is>
+    #    In this way, when you first init the VM, the "add media from source" options, you'll be pointing to the second <> parameter...  
+    #    i.e. my content in /mnt/hdd1/media/Config will simply be /config...  Same for the content directories.
+    volumes:
+      - '/mnt/hdd1/media/Config:/config' # read,write,open(xec) the config folder
+      - '/mnt/hdd1/media/Media1:/Media1'
+      - '/mnt/hdd1/media/Media2:/Media2'
+      - '/mnt/hdd1/media/Media..:/Media..'
